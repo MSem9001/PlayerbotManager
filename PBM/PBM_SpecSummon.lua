@@ -176,6 +176,14 @@ local function FinishBotSetup(botName, jobEntry)
     end
     SpecAfter(2, function()
         PBM.SendToBot("autogear", botName)
+        if PBM.FindTrackedRowIndexByName then
+            local di = PBM.FindTrackedRowIndexByName(botName)
+            if di and LichborneTrackerDB and LichborneTrackerDB.rows[di] then
+                LichborneTrackerDB.rows[di].spec = jobEntry.label
+                if PBM.RefreshOverviewRows then PBM.RefreshOverviewRows() end
+                if PBM.RefreshRows then PBM.RefreshRows() end
+            end
+        end
         DEFAULT_CHAT_FRAME:AddMessage("|cffC69B3APBM:|r |cff44ff44" .. botName ..
             "|r configured as |cffffcc00" .. jobEntry.label .. "|r.")
     end)
@@ -241,6 +249,69 @@ local function BuildRosterSnapshot()
     return snap
 end
 
+-- -- Auto-track any bot that joins your group ---------------------
+-- The Overview tracker is otherwise only populated by manually
+-- targeting someone and clicking "+Add Target", or by running a
+-- group/GS scan. That means a bot summoned via the spec buttons
+-- above *or* the addon's original "Add RndBot" buttons never gets a
+-- tracker row unless you happen to scan before it leaves your group
+-- - so if it's removed first, "Remove Orphaned Bots" has no record
+-- of it and can't flag it as orphaned. Give every new roster arrival
+-- a tracker row immediately (mirrors AddTargetToTracker in
+-- PBM_TrackerCore.lua), independent of the spec-queue logic below,
+-- so this covers ALL bot joins, not just spec-summoned ones.
+local function ResolveGroupUnitToken(name)
+    if UnitName("player") == name then return "player" end
+    if GetNumRaidMembers and GetNumRaidMembers() > 0 then
+        for i = 1, GetNumRaidMembers() do
+            local unit = "raid" .. i
+            if UnitName(unit) == name then return unit end
+        end
+    elseif GetNumPartyMembers and GetNumPartyMembers() > 0 then
+        for i = 1, GetNumPartyMembers() do
+            local unit = "party" .. i
+            if UnitName(unit) == name then return unit end
+        end
+    end
+    return nil
+end
+
+local function TrackNewMemberInDB(name, classToken)
+    if not name or name == "" then return end
+    if not (PBM.CLASS_TOKEN_MAP and PBM.EnsureClass and PBM.GetAllClassRows and PBM.DefaultRow) then return end
+    local cls = classToken and PBM.CLASS_TOKEN_MAP[classToken]
+    if not cls then return end
+    if not (LichborneTrackerDB and LichborneTrackerDB.rows) then return end
+
+    PBM.EnsureClass(cls)
+    local indices = PBM.GetAllClassRows(cls)
+    for _, di in ipairs(indices) do
+        local row = LichborneTrackerDB.rows[di]
+        if row.name and row.name ~= "" and row.name:lower() == name:lower() then
+            return -- already tracked
+        end
+    end
+    local slot = nil
+    for _, di in ipairs(indices) do
+        local row = LichborneTrackerDB.rows[di]
+        if not row.name or row.name == "" then slot = di; break end
+    end
+    if not slot then
+        table.insert(LichborneTrackerDB.rows, PBM.DefaultRow(cls))
+        slot = #LichborneTrackerDB.rows
+    end
+    local unit = ResolveGroupUnitToken(name)
+    LichborneTrackerDB.rows[slot].name  = name
+    LichborneTrackerDB.rows[slot].level = (unit and UnitLevel(unit)) or 0
+
+    if PBM.State.overviewRowFrames and #PBM.State.overviewRowFrames > 0 and PBM.RefreshOverviewRows then
+        PBM.RefreshOverviewRows()
+    end
+    if PBM.State.rowFrames and #PBM.State.rowFrames > 0 and PBM.RefreshRows then
+        PBM.RefreshRows()
+    end
+end
+
 local function HandleNewMember(name, classToken)
     local cmdToken = classToken and CLASS_TOKEN_TO_CMD[classToken]
     if not cmdToken then return end
@@ -268,6 +339,7 @@ _rosterFrame:SetScript("OnEvent", function()
     if oldSnap then
         for name, classToken in pairs(newSnap) do
             if not oldSnap[name] then
+                TrackNewMemberInDB(name, classToken)
                 HandleNewMember(name, classToken)
             end
         end
