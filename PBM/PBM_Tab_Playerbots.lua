@@ -245,81 +245,68 @@ function PBM.BuildPlayerbotsPanel(pbPanel, ctx)
     riyl:SetText("|cffffffffReset Instances for group|r")
     ey1 = ey1 + PB_STEP
 
-    -- Prune Tracker sub-section: removes rows from the Overview tracker
-    -- for anyone (bots or tracked alts) not currently in your party/raid.
-    local function PBM_CurrentGroupNameSet()
-        local set = {}
-        local me = UnitName("player")
-        if me then set[me:lower()] = true end
-        if GetNumRaidMembers and GetNumRaidMembers() > 0 then
-            for i = 1, GetNumRaidMembers() do
-                local n = UnitName("raid" .. i)
-                if n then set[n:lower()] = true end
-            end
-        elseif GetNumPartyMembers and GetNumPartyMembers() > 0 then
-            for i = 1, GetNumPartyMembers() do
-                local n = UnitName("party" .. i)
-                if n then set[n:lower()] = true end
-            end
-        end
-        return set
-    end
+    -- Save/Load Group sub-section: snapshot the current party/raid's
+    -- bot composition (class + spec + role, via PBM_SpecSummon.lua's
+    -- PBM.SaveCurrentGroup/PBM.LoadLastGroup) and replay it later.
+    -- Replaces the old standalone "Prune Tracker" button - that's now
+    -- redundant since "Remove Orphaned Bots" (Overview tab) already
+    -- removes stale bots from the tracker as part of its own cleanup.
+    local saveGroupBtn = PBIconBtn(CMD_X1, ey1, PB_ICON.."inv_misc_note_01",
+        "Save Group/Raid", nil)
+    saveGroupBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Save Group/Raid", 0.78, 0.61, 0.23)
+        GameTooltip:AddLine("Saves every bot currently in your group/raid", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("as the last group - class, spec, and role for", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("each (not names - a fresh summon gets a new one).", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Only bots summoned via the spec buttons have a", 1, 0.6, 0.2)
+        GameTooltip:AddLine("known spec to save - others are saved class-only.", 1, 0.6, 0.2)
+        GameTooltip:Show()
+    end)
+    saveGroupBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    saveGroupBtn:SetScript("OnClick", function() PBM.SaveCurrentGroup() end)
+    local sgyl = pbPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sgyl:SetPoint("LEFT", saveGroupBtn, "RIGHT", 6, 0)
+    sgyl:SetJustifyH("LEFT")
+    sgyl:SetText("|cffffffffSave Group/Raid (as last group)|r")
+    ey1 = ey1 + PB_STEP
 
-    if not StaticPopupDialogs["PBM_PRUNE_TRACKER"] then
-        StaticPopupDialogs["PBM_PRUNE_TRACKER"] = {
-            text = "|cffd4af37Prune Tracker|r\n\nRemove |cffFF8C00%s|r entr" ..
-                "y/entries from the Overview tracker that are not currently\n" ..
-                "in your group or raid?\n\nThis only edits tracker rows — it does not touch your live group.",
-            button1 = "Yes, Remove",
+    if not StaticPopupDialogs["PBM_LOAD_LAST_GROUP"] then
+        StaticPopupDialogs["PBM_LOAD_LAST_GROUP"] = {
+            text = "|cffd4af37Load Last Group|r\n\nRe-summon your last-saved group/raid (|cffFF8C00%s|r bot(s)),\n" ..
+                "one at a time, with talents/strategy/gear auto-applied?",
+            button1 = "Yes, Load",
             button2 = "Cancel",
-            OnAccept = function()
-                local names = PBM.State.pendingPruneNames
-                if names then
-                    for _, n in ipairs(names) do
-                        PBM.RemoveCharacterReferences(n)
-                    end
-                end
-                PBM.State.pendingPruneNames = nil
-                if PBM.RefreshRows then PBM.RefreshRows() end
-                if PBM.RefreshOverviewRows then PBM.RefreshOverviewRows() end
-            end,
-            OnCancel = function() PBM.State.pendingPruneNames = nil end,
+            OnAccept = function() PBM.LoadLastGroup() end,
             timeout      = 0,
             whileDead    = true,
             hideOnEscape = true,
         }
     end
 
-    local pruneTrackerBtn = PBIconBtn(CMD_X1, ey1, PB_ICON.."inv_misc_punchcards_yellow",
-        "Prune Tracker", nil)
-    pruneTrackerBtn:SetScript("OnEnter", function(self)
+    local loadGroupBtn = PBIconBtn(CMD_X1, ey1, PB_ICON.."inv_misc_book_09",
+        "Load Last Group/Raid", nil)
+    loadGroupBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Prune Tracker", 0.78, 0.61, 0.23)
-        GameTooltip:AddLine("Removes entries from the Overview tracker", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("that are no longer in your group or raid.", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("(Applies to any tracked name, not just bots.)", 1, 0.6, 0.2)
+        GameTooltip:AddLine("Load Last Group/Raid", 0.78, 0.61, 0.23)
+        GameTooltip:AddLine("Re-summons your last-saved group, one bot at a", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("time, waiting for each to finish autogear before", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("summoning the next.", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
-    pruneTrackerBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    pruneTrackerBtn:SetScript("OnClick", function()
-        local inGroup = PBM_CurrentGroupNameSet()
-        local stale = {}
-        for _, row in ipairs(LichborneTrackerDB.rows or {}) do
-            if row.name and row.name ~= "" and not inGroup[row.name:lower()] then
-                table.insert(stale, row.name)
-            end
-        end
-        if #stale == 0 then
-            LichborneOutput("|cffC69B3APBM:|r No tracked entries outside your current group/raid.", 1, 0.85, 0)
+    loadGroupBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    loadGroupBtn:SetScript("OnClick", function()
+        local saved = PBMConfig and PBMConfig.savedGroups and PBMConfig.savedGroups.last
+        if not saved or #saved == 0 then
+            LichborneOutput("|cffC69B3APBM:|r No saved group to load - use Save Group/Raid first.", 1, 0.5, 0.5)
             return
         end
-        PBM.State.pendingPruneNames = stale
-        StaticPopup_Show("PBM_PRUNE_TRACKER", #stale)
+        StaticPopup_Show("PBM_LOAD_LAST_GROUP", #saved)
     end)
-    local ptyl = pbPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ptyl:SetPoint("LEFT", pruneTrackerBtn, "RIGHT", 6, 0)
-    ptyl:SetJustifyH("LEFT")
-    ptyl:SetText("|cffffffffPrune Tracker (remove entries not in group)|r")
+    local lgyl = pbPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lgyl:SetPoint("LEFT", loadGroupBtn, "RIGHT", 6, 0)
+    lgyl:SetJustifyH("LEFT")
+    lgyl:SetText("|cffffffffLoad Last Group/Raid|r")
     ey1 = ey1 + PB_STEP
 
     -- ── Universal Strategies List ─────────────────────────────────

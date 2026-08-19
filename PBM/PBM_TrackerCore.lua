@@ -1154,7 +1154,12 @@ local function OnFirstShow()
         GameTooltip:Show()
     end)
     orphanedBotsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    orphanedBotsBtn:SetScript("OnClick", function()
+    -- Extracted to PBM.RemoveOrphanedBots (rather than left inline in the
+    -- button's OnClick) so Save Group/Raid can also call it - to prune
+    -- stale tracker entries before scraping the tracker for spec info.
+    -- onComplete (optional) fires once every orphan has been whispered
+    -- the remove command and the tracker/overview rows are refreshed.
+    PBM.RemoveOrphanedBots = function(onComplete)
         -- Get current group/raid members
         local groupMembers = {}
         local playerName = UnitName("player")
@@ -1198,6 +1203,7 @@ local function OnFirstShow()
         if #botNames == 0 then
             LichborneOutput("|cffC69B3APBM:|r No orphaned bots found.", 1, 0.5, 0.5)
             if LichborneAddStatus then LichborneAddStatus:SetText("|cffff4444No orphaned bots found.|r") end
+            if onComplete then onComplete() end
             return
         end
         LichborneOutput("|cffC69B3APBM:|r Logging out "..#botNames.." orphaned bots...", 1, 0.85, 0)
@@ -1221,6 +1227,7 @@ local function OnFirstShow()
                 if PBM.RefreshOverviewRows then PBM.RefreshOverviewRows() end
                 LichborneOutput("|cffC69B3APBM:|r |cff44ff44All "..#botNames.." orphaned bots logged out and removed from tracker.|r", 1, 0.85, 0)
                 if LichborneAddStatus then LichborneAddStatus:SetText("|cff44ff44Orphaned bots logged out & untracked ("..#botNames..").|r") end
+                if onComplete then onComplete() end
                 return
             end
             local bname = botNames[orphanIdx]
@@ -1233,7 +1240,8 @@ local function OnFirstShow()
             if PBM.RemoveCharacterReferences then PBM.RemoveCharacterReferences(bname) end
             orphanIdx = orphanIdx + 1
         end)
-    end)
+    end
+    orphanedBotsBtn:SetScript("OnClick", function() PBM.RemoveOrphanedBots() end)
 
     -- ── +Add Group IP Tiers button ─────────────────────────────
     local ipTiersBtn = CreateFrame("Button", "LichborneIPTiersBtn", f)

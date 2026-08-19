@@ -218,13 +218,15 @@ function PBM.SummonSpecBot(cmdToken, job)
     local q = PBM.State.pendingSpecSummons[cmdToken]
     if not q then q = {}; PBM.State.pendingSpecSummons[cmdToken] = q end
     q[#q + 1] = {
-        spec  = job.spec,
-        role  = job.role,
-        label = job.label,
-        t     = GetTime(),
+        cmd        = cmdToken,
+        spec       = job.spec,
+        role       = job.role,
+        label      = job.label,
+        onComplete = job.onComplete,
+        t          = GetTime(),
     }
     SendChatMessage(".playerbots bot addclass " .. cmdToken, "SAY")
-    DEFAULT_CHAT_FRAME:AddMessage("|cffC69B3APBM:|r Summoning random " .. cmdToken ..
+    LichborneOutput("|cffC69B3APBM:|r Summoning random " .. cmdToken ..
         " -> will auto-set |cffffcc00" .. job.label .. "|r on join.")
 end
 
@@ -239,13 +241,29 @@ local function FinishBotSetup(botName, jobEntry)
         if PBM.FindTrackedRowIndexByName then
             local di = PBM.FindTrackedRowIndexByName(botName)
             if di and LichborneTrackerDB and LichborneTrackerDB.rows[di] then
-                LichborneTrackerDB.rows[di].spec = jobEntry.label
+                local row = LichborneTrackerDB.rows[di]
+                row.spec      = jobEntry.label
+                -- Structured fields (as opposed to the display label above)
+                -- so Save Group/Raid can scrape the tracker directly and
+                -- rebuild an exact spec/role/talent replay later.
+                row.specCmd   = jobEntry.cmd
+                row.specToken = jobEntry.spec
+                row.specRole  = jobEntry.role
                 if PBM.RefreshOverviewRows then PBM.RefreshOverviewRows() end
                 if PBM.RefreshRows then PBM.RefreshRows() end
             end
         end
-        DEFAULT_CHAT_FRAME:AddMessage("|cffC69B3APBM:|r |cff44ff44" .. botName ..
+        if jobEntry.cmd and PBM.RememberBotSpec then
+            PBM.RememberBotSpec(botName, jobEntry.cmd, jobEntry)
+        end
+        LichborneOutput("|cffC69B3APBM:|r |cff44ff44" .. botName ..
             "|r configured as |cffffcc00" .. jobEntry.label .. "|r.")
+        -- Give autogear a few seconds to actually finish equipping
+        -- server-side before signaling completion (used by Load Group
+        -- to wait out each bot fully before summoning the next one).
+        if jobEntry.onComplete then
+            SpecAfter(3, jobEntry.onComplete)
+        end
     end)
 end
 
@@ -269,6 +287,166 @@ local function ApplySpecToNewBot(botName, jobEntry)
             FinishBotSetup(botName, jobEntry)
         end
     end)
+end
+
+-- ============================================================
+--  Save/Load Group - persist and replay a bot composition
+-- ============================================================
+-- PBMConfig is a declared SavedVariable (see the .toc), so anything
+-- stored under it survives a relog. Two things live there:
+--   PBMConfig.lastSpecByBot[name] = {cmd, spec, label, role}
+--     Recorded every time FinishBotSetup finishes configuring a bot
+--     via the spec-summon buttons above - this is how Save Group
+--     knows what spec/role a currently-grouped bot was set to,
+--     without needing to query the server for a bot's live talents.
+--     A bot never run through these buttons (e.g. summoned with the
+--     plain "Add RndBot" click, or already in the world from a
+--     previous session) simply has no entry here.
+--   PBMConfig.savedGroups.last = { {cmd, spec, label, role}, ... }
+--     An ordered snapshot of your last-saved group/raid composition.
+--     No bot *names* are stored - a fresh summon gets a fresh random
+--     name each time, so only class/spec/role/label are replayed.
+PBMConfig               = PBMConfig or {}
+PBMConfig.lastSpecByBot = PBMConfig.lastSpecByBot or {}
+PBMConfig.savedGroups   = PBMConfig.savedGroups   or {}
+
+function PBM.RememberBotSpec(botName, cmdToken, jobEntry)
+    if not botName or botName == "" or not cmdToken then return end
+    PBMConfig.lastSpecByBot[botName:lower()] = {
+        cmd   = cmdToken,
+        spec  = jobEntry.spec,
+        label = jobEntry.label,
+        role  = jobEntry.role,
+    }
+end
+
+-- Ordered {name, classToken} list for every OTHER member of your
+-- current party/raid (excludes you) - used by Save Group.
+local function CurrentGroupRoster()
+    local out = {}
+    local me = UnitName("player")
+    if GetNumRaidMembers and GetNumRaidMembers() > 0 then
+        for i = 1, GetNumRaidMembers() do
+            local unit = "raid" .. i
+            local n = UnitName(unit)
+            if n and n ~= me then
+                local _, c = UnitClass(unit)
+                out[#out + 1] = { name = n, classToken = c }
+            end
+        end
+    elseif GetNumPartyMembers and GetNumPartyMembers() > 0 then
+        for i = 1, GetNumPartyMembers() do
+            local unit = "party" .. i
+            local n = UnitName(unit)
+            if n and n ~= me then
+                local _, c = UnitClass(unit)
+                out[#out + 1] = { name = n, classToken = c }
+            end
+        end
+    end
+    return out
+end
+
+-- -- Save the current party/raid's class+spec+role as "last group" --
+-- Prunes orphaned tracker entries first (via PBM.RemoveOrphanedBots),
+-- then scrapes the now-clean Overview tracker for each currently-grouped
+-- bot's spec/role (written there by FinishBotSetup) rather than relying
+-- on a separate in-memory-only record of who was summoned this session.
+function PBM.SaveCurrentGroup()
+    -- Self-heal: recreate these if anything ever left them nil, rather
+    -- than erroring out (this table is a declared SavedVariable, so its
+    -- keys should persist, but this guards Save/Load against ever
+    -- crashing on a nil PBMConfig sub-table again).
+    PBMConfig               = PBMConfig or {}
+    PBMConfig.lastSpecByBot = PBMConfig.lastSpecByBot or {}
+    PBMConfig.savedGroups   = PBMConfig.savedGroups   or {}
+
+    local roster = CurrentGroupRoster()
+    if #roster == 0 then
+        LichborneOutput("|cffC69B3APBM:|r Nothing to save - you're not grouped with any bots.")
+        return
+    end
+
+    local function doSave()
+        local ok, err = pcall(function()
+            local saved = {}
+            local knownCount, unknownCount = 0, 0
+            for _, m in ipairs(roster) do
+                local cmd = m.classToken and CLASS_TOKEN_TO_CMD[m.classToken]
+                if cmd then
+                    local row = PBM.FindTrackedRowIndexByName and select(2, PBM.FindTrackedRowIndexByName(m.name))
+                    if row and row.specCmd == cmd then
+                        saved[#saved + 1] = { cmd = cmd, spec = row.specToken, label = row.spec, role = row.specRole }
+                        knownCount = knownCount + 1
+                    else
+                        saved[#saved + 1] = { cmd = cmd }  -- class only - no known spec, random on load
+                        unknownCount = unknownCount + 1
+                    end
+                end
+            end
+            PBMConfig.savedGroups.last = saved
+            LichborneOutput("|cffC69B3APBM:|r |cff44ff44Saved|r current group as |cffffcc00last group|r (" ..
+                #saved .. " bot(s): " .. knownCount .. " with spec/role, " .. unknownCount .. " class-only" ..
+                (unknownCount > 0 and " |cffaaaaaa(not summoned via the spec buttons, so their spec wasn't known)|r" or "") .. ").")
+        end)
+        if not ok then
+            LichborneOutput("|cffff0000PBM:|r Save Group failed - " .. tostring(err), 1, 0.2, 0.2)
+        end
+    end
+
+    if PBM.RemoveOrphanedBots then
+        LichborneOutput("|cffC69B3APBM:|r Pruning orphaned tracker entries before saving...")
+        PBM.RemoveOrphanedBots(doSave)
+    else
+        doSave()
+    end
+end
+
+-- -- Re-summon the last-saved group, one bot at a time -------------
+-- Waits for each bot to fully finish (talents -> strategy -> autogear,
+-- via FinishBotSetup's onComplete) before summoning the next, rather
+-- than firing every addclass command at once.
+local function AdvanceLoadQueue(entries, idx)
+    local entry = entries[idx]
+    if not entry then
+        LichborneOutput("|cffC69B3APBM:|r |cff44ff44Finished loading saved group|r (" ..
+            #entries .. " bot(s)).")
+        return
+    end
+    local advanced = false
+    local function advanceOnce()
+        if advanced then return end
+        advanced = true
+        AdvanceLoadQueue(entries, idx + 1)
+    end
+    if entry.spec then
+        PBM.SummonSpecBot(entry.cmd, {
+            spec = entry.spec, role = entry.role, label = entry.label,
+            onComplete = advanceOnce,
+        })
+        -- Safety net: if this particular bot never actually joins (pool
+        -- exhausted, server hiccup, etc.) onComplete never fires - don't
+        -- let one failure stall the rest of the group forever.
+        SpecAfter(45, advanceOnce)
+    else
+        SendChatMessage(".playerbots bot addclass " .. entry.cmd, "SAY")
+        LichborneOutput("|cffC69B3APBM:|r Summoning random " .. entry.cmd ..
+            " |cffaaaaaa(no saved spec)|r.")
+        SpecAfter(5, advanceOnce)
+    end
+end
+
+function PBM.LoadLastGroup()
+    PBMConfig             = PBMConfig or {}
+    PBMConfig.savedGroups = PBMConfig.savedGroups or {}
+    local saved = PBMConfig.savedGroups.last
+    if not saved or #saved == 0 then
+        LichborneOutput("|cffC69B3APBM:|r No saved group to load - use Save Group first.")
+        return
+    end
+    LichborneOutput("|cffC69B3APBM:|r |cff44ff44Loading|r saved group - " ..
+        #saved .. " bot(s), one at a time.")
+    AdvanceLoadQueue(saved, 1)
 end
 
 -- -- Join detection via roster diffing --------------------------------
