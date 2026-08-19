@@ -71,18 +71,31 @@ function PBM.BuildPlayerbotsPanel(pbPanel, ctx)
         end)
     end
 
-    -- ── Column 1 – Add RndBot (x = 400) ───────────────────────
-    PBLabel(400, PB_ROW_TOP, "Add RndBot")
-    PBDivider(400, PB_ROW_TOP + 16, 190)
+    -- ── Column 1 – Add RndBot (x = 332) ───────────────────────
+    -- Pulled back a bit from x=392 - that put the PvP column's own
+    -- label text overlapping "Universal Strategies" at x=700. This
+    -- leaves a clean gap before it while keeping the trio close together.
+    local RNDBOT_X = 332
+    PBLabel(RNDBOT_X, PB_ROW_TOP, "Add RndBot")
+    PBDivider(RNDBOT_X, PB_ROW_TOP + 16, 120)
 
-    -- ── Column 1b – Auto-Spec quick buttons (x = 585) ─────────
+    -- ── Column 1b – Auto-Spec (PvE) quick buttons (x = 472) ───
     -- Summons a random bot of the class AND auto-sets talents,
     -- strategy, and gear once it joins. See PBM_SpecSummon.lua.
-    local SPEC_X    = 585
+    local SPEC_X    = 472
     local SPEC_STEP = 20
     local SPEC_SZ   = 18
     PBLabel(SPEC_X, PB_ROW_TOP, "Auto-Spec (PvE)")
-    PBDivider(SPEC_X, PB_ROW_TOP + 16, 110)
+    PBDivider(SPEC_X, PB_ROW_TOP + 16, 85)
+
+    -- ── Column 1c – Auto-Spec (PvP) quick buttons (x = 567) ───
+    -- Same summon-and-configure flow as the PvE column, but using
+    -- PBM.SpecDataPvP's "<x> pvp" talent builds. See PBM_SpecSummon.lua.
+    -- Reading order left-to-right is now: Add RndBot -> PvE -> PvP,
+    -- with a clear gap before the Universal Strategies list (x=700).
+    local SPEC_PVP_X = 567
+    PBLabel(SPEC_PVP_X, PB_ROW_TOP, "Auto-Spec (PvP)")
+    PBDivider(SPEC_PVP_X, PB_ROW_TOP + 16, 80)
 
     local CLASS_DEFS = {
         { name="Death Knight", cmd="dk",      hex="C41F3B", icon=PB_ADDON.."addclass_deathknight.blp" },
@@ -98,7 +111,7 @@ function PBM.BuildPlayerbotsPanel(pbPanel, ctx)
     }
     local cy = PB_ROW_TOP + 24
     for _, cd in ipairs(CLASS_DEFS) do
-        local cb = PBIconBtn(400, cy, cd.icon, cd.name, "Summon a random "..cd.name.." RndBot.")
+        local cb = PBIconBtn(RNDBOT_X, cy, cd.icon, cd.name, "Summon a random "..cd.name.." RndBot.")
         local cap = cd.cmd
         cb:SetScript("OnClick", function() SendChatMessage(".playerbots bot addclass "..cap, "SAY") end)
         local cl = pbPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -116,6 +129,20 @@ function PBM.BuildPlayerbotsPanel(pbPanel, ctx)
                     " and auto-set talents ("..sp.spec.."), a matching strategy, and gear once it joins.",
                     function() PBM.SummonSpecBot(cd.cmd, sp) end)
                 sx = sx + SPEC_STEP
+            end
+        end
+
+        -- Spec quick-buttons: PvP variants
+        local specsPvp = PBM.SpecDataPvP and PBM.SpecDataPvP[cd.cmd]
+        if specsPvp then
+            local sxp = SPEC_PVP_X
+            for _, sp in ipairs(specsPvp) do
+                PBM.CreateSpecIconButton(pbPanel, sxp, cy + 7, SPEC_SZ, sp.icon,
+                    cd.name.." — "..sp.label.." |cffee4433PvP|r",
+                    "Summon a random "..cd.name..
+                    " and auto-set talents ("..sp.spec.."), a matching strategy, and gear once it joins.",
+                    function() PBM.SummonSpecBot(cd.cmd, sp) end)
+                sxp = sxp + SPEC_STEP
             end
         end
 

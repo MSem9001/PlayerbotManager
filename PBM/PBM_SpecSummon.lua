@@ -107,6 +107,66 @@ PBM.SpecData = {
     },
 }
 
+-- -- PvP spec quick-buttons per class ------------------------------
+-- Mirrors PBM.SpecData above, but every "spec" string is a distinct
+-- "<x> pvp" talent build (PBM_TalentData.lua carries a separate point
+-- allocation for each) rather than the PvE one. A few PvE-only builds
+-- have no PvP counterpart in the talent data and are intentionally
+-- left out here: Death Knight "Double Aura Blood", Mage "Frostfire",
+-- and Druid "Bear" (no dedicated PvP bear-tank build).
+PBM.SpecDataPvP = {
+    dk = {
+        { spec="blood pvp",  label="Blood",  role="tank", icon=ICN.."Spell_DeathKnight_BloodPresence"  },
+        { spec="frost pvp",  label="Frost",  role="dps",  icon=ICN.."Spell_DeathKnight_FrostPresence"  },
+        { spec="unholy pvp", label="Unholy", role="dps",  icon=ICN.."Spell_DeathKnight_UnholyPresence" },
+    },
+    druid = {
+        { spec="balance pvp", label="Balance",     role="dps",  icon=ICN.."Spell_Nature_StarFall"     },
+        { spec="resto pvp",   label="Restoration", role="heal", icon=ICN.."Spell_Nature_HealingTouch" },
+        { spec="cat pvp",     label="Cat",         role="dps",  icon=ICN.."Ability_Druid_CatForm"     },
+    },
+    hunter = {
+        { spec="bm pvp",   label="Beast Mastery", role="dps", icon=ICN.."Ability_Hunter_BeastTaming" },
+        { spec="mm pvp",   label="Marksmanship",  role="dps", icon=ICN.."Ability_Marksmanship"       },
+        { spec="surv pvp", label="Survival",      role="dps", icon=ICN.."Ability_Hunter_SwiftStrike" },
+    },
+    mage = {
+        { spec="arcane pvp", label="Arcane", role="dps", icon=ICN.."Spell_Holy_MagicalSentry" },
+        { spec="fire pvp",   label="Fire",   role="dps", icon=ICN.."Spell_Fire_FireBolt02"    },
+        { spec="frost pvp",  label="Frost",  role="dps", icon=ICN.."Spell_Frost_FrostBolt02"  },
+    },
+    paladin = {
+        { spec="holy pvp", label="Holy",        role="heal", icon=ICN.."Spell_Holy_HolyBolt"                },
+        { spec="prot pvp", label="Protection",  role="tank", icon=ICN.."Ability_Paladin_ShieldoftheTemplar" },
+        { spec="ret pvp",  label="Retribution", role="dps",  icon=ICN.."Spell_Holy_AuraofLight"             },
+    },
+    priest = {
+        { spec="disc pvp",   label="Discipline", role="heal", icon=ICN.."Spell_Holy_WordFortitude"    },
+        { spec="holy pvp",   label="Holy",       role="heal", icon=ICN.."Spell_Holy_GuardianSpirit"   },
+        { spec="shadow pvp", label="Shadow",     role="dps",  icon=ICN.."Spell_Shadow_ShadowWordPain" },
+    },
+    rogue = {
+        { spec="as pvp",       label="Assassination", role="dps", icon=ICN.."Ability_Rogue_Eviscerate" },
+        { spec="combat pvp",   label="Combat",        role="dps", icon=ICN.."Ability_BackStab"         },
+        { spec="subtlety pvp", label="Subtlety",      role="dps", icon=ICN.."Ability_Stealth"          },
+    },
+    shaman = {
+        { spec="ele pvp",   label="Elemental",   role="dps",  icon=ICN.."Spell_Nature_Lightning"       },
+        { spec="enh pvp",   label="Enhancement", role="dps",  icon=ICN.."Spell_Nature_LightningShield" },
+        { spec="resto pvp", label="Restoration", role="heal", icon=ICN.."Spell_Nature_MagicImmunity"   },
+    },
+    warlock = {
+        { spec="affli pvp",  label="Affliction",  role="dps", icon=ICN.."Spell_Shadow_DeathCoil"     },
+        { spec="demo pvp",   label="Demonology",  role="dps", icon=ICN.."Spell_Shadow_Metamorphosis" },
+        { spec="destro pvp", label="Destruction", role="dps", icon=ICN.."Spell_Shadow_RainOfFire"    },
+    },
+    warrior = {
+        { spec="arms pvp", label="Arms",       role="dps",  icon=ICN.."Ability_Warrior_Sunder"          },
+        { spec="fury pvp", label="Fury",       role="dps",  icon=ICN.."Ability_Warrior_InnerRage"       },
+        { spec="prot pvp", label="Protection", role="tank", icon=ICN.."Ability_Warrior_DefensiveStance" },
+    },
+}
+
 -- -- tiny local timer helper (mirrors PBM_Core.lua's CoreTimerAfter) --
 local function SpecAfter(delay, func)
     if C_Timer and C_Timer.After then
