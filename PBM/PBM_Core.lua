@@ -127,6 +127,14 @@ _coreFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- Clear Strategy List and repopulate via full QueryBotStrategies chain
         if PBM.State.pickingPending[sender] and msg:find("^Picking ") then
             PBM.State.pickingPending[sender] = nil
+            -- Give the server a couple seconds to fully settle the new
+            -- talent build server-side before autogear runs against it
+            -- (same buffer the spec-summon buttons use), then re-gear the
+            -- bot for whatever spec was just picked from the Templates menu.
+            CoreTimerAfter(2, function()
+                PBM.SendToBot("autogear", sender)
+                LichborneOutput("|cffC69B3APBM:|r |cff44ff44"..sender.."|r autogeared for new spec.", 1, 0.85, 0)
+            end)
             local menuFrame = PBM.State.lastQueriedMenu[sender]
             if menuFrame and menuFrame:IsShown() then
                 if menuFrame.clearStratDisplay then menuFrame.clearStratDisplay() end

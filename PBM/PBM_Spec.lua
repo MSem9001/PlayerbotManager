@@ -76,16 +76,31 @@ local function CalcSpec()
 
     if bestPoints == 0 then
         PBM.State.specRetries = PBM.State.specRetries + 1
-        local maxSpecRetries = PBM.State.LichborneGroupScanActive and 1 or 0
+        -- During Full Group Scan, gear and spec are now read off the same
+        -- single InspectUnit() call per player (previously spec had its
+        -- own dedicated pass, so by the time it ran a player had already
+        -- been inspected once already and their talent data was reliably
+        -- cached). A cold single inspect doesn't always have talent data
+        -- ready on the first read, so allow a few real retries here, and
+        -- actively re-request (like CalcGS does) rather than just waiting
+        -- and re-reading the same not-yet-ready cache.
+        local maxSpecRetries = PBM.State.LichborneGroupScanActive and 4 or 0
         PBM.DBG("|cffff4444Spec talent data = 0/0/0 for |r|cffffff88"..(rowData.name or "?").."|r — retry "..PBM.State.specRetries.."/"..maxSpecRetries)
-        if PBM.State.specRetries >= maxSpecRetries then
-            PBM.DBG("|cffff4444FAILED spec for |r|cffffff88"..(rowData.name or "?").."|r — all trees 0 after "..maxSpecRetries.." retries")
-            LichborneOutput("|cffff4444"..(rowData.name or "?")..":|r |cffff4444FAILED — could not read talent data.|r", 1, 0.5, 0.5)
-            if LichborneAddStatus then
-                LichborneAddStatus:SetText("|cffff4444Talent data unavailable. Try standing closer.|r")
+        if PBM.State.specRetries < maxSpecRetries then
+            local unit = PBM.State.LichborneInspectUnit or "target"
+            if UnitExists(unit) then
+                InspectUnit(unit)
+                PBM.DBG("Re-fired InspectUnit("..unit..") for spec retry on |cffffff88"..(rowData.name or "?").."|r")
             end
-            PBM.State.LichborneSpecTarget = nil; PBM.State.specRetries = 0
+            PBM.State.specWait = 0
+            return
         end
+        PBM.DBG("|cffff4444FAILED spec for |r|cffffff88"..(rowData.name or "?").."|r — all trees 0 after "..maxSpecRetries.." retries")
+        LichborneOutput("|cffff4444"..(rowData.name or "?")..":|r |cffff4444FAILED — could not read talent data.|r", 1, 0.5, 0.5)
+        if LichborneAddStatus then
+            LichborneAddStatus:SetText("|cffff4444Talent data unavailable. Try standing closer.|r")
+        end
+        PBM.State.LichborneSpecTarget = nil; PBM.State.specRetries = 0
         return
     end
 

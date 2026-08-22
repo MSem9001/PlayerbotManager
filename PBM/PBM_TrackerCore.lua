@@ -981,10 +981,10 @@ local function OnFirstShow()
         0.2, 0.5, 0.9, 175, 8,
         155, {
             {"Full Group Scan",0.78,0.61,0.23},
-            {"Long scan is used for first time setup",0.8,0.8,0.8},
-            {"or reconfiguration of raid. Performs",0.8,0.8,0.8},
-            {"gear and spec scan. Allow 6s per",0.8,0.8,0.8},
-            {"character.",0.8,0.8,0.8},
+            {"Used for first time setup or",0.8,0.8,0.8},
+            {"reconfiguration of raid. Reads gear",0.8,0.8,0.8},
+            {"and spec together in one pass. Allow",0.8,0.8,0.8},
+            {"~3s per character.",0.8,0.8,0.8},
         })
     maintBtn:SetScript("OnClick", function()
         local playerName = UnitName("player")
@@ -997,7 +997,7 @@ local function OnFirstShow()
         AddGroupMembers(function(added, skipped)
             -- Abort if Stop Scan was pressed during the add phase
             if not PBM.State.LichborneGroupScanActive then return end
-            -- Build shared unit list used by both GS and Spec phases
+            -- Build shared unit list
             local units = {}
             units[#units+1] = "player"
             if GetNumRaidMembers() > 0 then
@@ -1018,10 +1018,22 @@ local function OnFirstShow()
                 LichborneAddStatus:SetText("|cffff4444No group members found.|r")
                 return
             end
-            -- ── Phase 2: GS scan ──────────────────────────────────────────
-            local totalTime = math.ceil(#units * 6)
+            -- ── Combined gear+spec pass ────────────────────────────────
+            -- PBM_Inspect.lua's CalcGS and PBM_Spec.lua's CalcSpec are
+            -- each already independently wired to fire off the same
+            -- "INSPECT_READY" event that a single InspectUnit() call
+            -- produces. Previously this ran as two full back-to-back
+            -- passes over the whole group (GS phase, then a second Spec
+            -- phase) - inspecting every player twice for no reason, since
+            -- one inspect already carries both gear and talent data. This
+            -- now points both PBM.State.LichborneInspectTarget and
+            -- PBM.State.LichborneSpecTarget at the same player and fires
+            -- one InspectUnit, letting both handlers resolve off that
+            -- single round-trip - roughly halving how long a Full Group
+            -- Scan takes.
+            local totalTime = math.ceil(#units * 3)
             LichborneAddStatus:SetText("|cffff9900Added "..added.." new, skipped "..skipped.." duplicates"..(skipped > 0 and ". Levels updated." or ".").."\nFull scan: "..#units.." players (~"..totalTime.."s)...|r")
-            LichborneOutput("|cffC69B3APBM:|r Full Group Scan started (+"..added..", skipped "..skipped..(skipped > 0 and ". Levels updated." or "")..").\nGS phase: "..#units.." players.", 1, 0.85, 0)
+            LichborneOutput("|cffC69B3APBM:|r Full Group Scan started (+"..added..", skipped "..skipped..(skipped > 0 and ". Levels updated." or "")..").\nScanning "..#units.." players (gear + spec together).", 1, 0.85, 0)
             local scanStartTime = GetTime()
             local idx, elapsed, inspecting = 1, 0, false
             local gFrame = CreateFrame("Frame")
@@ -1029,76 +1041,40 @@ local function OnFirstShow()
             gFrame:SetScript("OnUpdate", function(_, delta)
                 elapsed = elapsed + delta
                 if inspecting then
-                    if PBM.State.LichborneInspectTarget ~= nil and elapsed < 25 then return end
-                    if PBM.State.LichborneInspectTarget ~= nil then
-                        PBM.DBG("|cffff9900FullScan GS 25s cap|r — forcing advance to next player")
+                    local stillWaiting = PBM.State.LichborneInspectTarget ~= nil or PBM.State.LichborneSpecTarget ~= nil
+                    if stillWaiting and elapsed < 25 then return end
+                    if stillWaiting then
+                        PBM.DBG("|cffff9900FullScan 25s cap|r — forcing advance to next player")
+                        PBM.State.LichborneInspectTarget = nil
+                        PBM.State.LichborneSpecTarget = nil
                     else
-                        PBM.DBG("|cff44ff44FullScan GS wait done|r — advancing")
+                        PBM.DBG("|cff44ff44FullScan wait done|r — advancing")
                     end
                     inspecting = false; elapsed = 0
                 end
                 if idx > #units then
                     gFrame:SetScript("OnUpdate", nil)
-                    PBM.DBG("|cff44ff44FullScan GS phase done|r — elapsed |cffffff88"..string.format("%.1f", GetTime()-scanStartTime).."s|r")
-                    -- ── Phase 3: Spec scan ────────────────────────────────
-                    LichborneAddStatus:SetText("|cffff9900GS done. Starting Specialization scan ("..#units.." players)...|r")
-                    LichborneOutput("|cffC69B3APBM:|r GS phase complete. Starting Specialization phase.", 1, 0.85, 0)
-                    local sIdx, sElapsed, sInspecting = 1, 0, false
-                    local sFrame = CreateFrame("Frame")
-                    activeInspectFrame = sFrame
-                    sFrame:SetScript("OnUpdate", function(_, sdelta)
-                        sElapsed = sElapsed + sdelta
-                        if sInspecting then
-                            if PBM.State.LichborneSpecTarget ~= nil and sElapsed < 25 then return end
-                            if PBM.State.LichborneSpecTarget ~= nil then
-                                PBM.DBG("|cffff9900FullScan Spec 25s cap|r — forcing advance")
-                            else
-                                PBM.DBG("|cff44ff44FullScan Spec wait done|r — advancing")
+                    PBM.State.LichborneGroupScanActive = false
+                    SetScanActive(false)
+                    LichborneAddStatus:SetText("|cff44ff44Full Group Scan complete!|r")
+                    LichborneOutput("|cffC69B3APBM:|r |cff44ff44Full Group Scan complete.|r", 1, 0.85, 0)
+                    PBM.DBG("|cff44ff44FullScan complete|r — total elapsed |cffffff88"..string.format("%.1f", GetTime()-scanStartTime).."s|r")
+                    PBM.RefreshRows(); if PBM.State.raidRowFrames and #PBM.State.raidRowFrames > 0 then PBM.RefreshRaidRows() end
+                    -- Trigger group strategies query for all scanned members
+                    local strCount = 0
+                    for _, unit in ipairs(units) do
+                        if not UnitIsUnit(unit, "player") then
+                            local name = UnitName(unit)
+                            if name and name ~= "" and UnitIsPlayer(unit) then
+                                PBM.State.joinPending[name] = { step = 1 }
+                                PBM.SendToBot("co ?", name)
+                                strCount = strCount + 1
                             end
-                            sInspecting = false; sElapsed = 0
                         end
-                        if sIdx > #units then
-                            sFrame:SetScript("OnUpdate", nil)
-                            PBM.State.LichborneGroupScanActive = false
-                            SetScanActive(false)
-                            LichborneAddStatus:SetText("|cff44ff44Full Group Scan complete!|r")
-                            LichborneOutput("|cffC69B3APBM:|r |cff44ff44Full Group Scan complete.|r", 1, 0.85, 0)
-                            PBM.DBG("|cff44ff44FullScan complete|r — total elapsed |cffffff88"..string.format("%.1f", GetTime()-scanStartTime).."s|r")
-                            PBM.RefreshRows(); if PBM.State.raidRowFrames and #PBM.State.raidRowFrames > 0 then PBM.RefreshRaidRows() end
-                            -- Trigger group strategies query for all scanned members
-                            local strCount = 0
-                            for _, unit in ipairs(units) do
-                                if not UnitIsUnit(unit, "player") then
-                                    local name = UnitName(unit)
-                                    if name and name ~= "" and UnitIsPlayer(unit) then
-                                        PBM.State.joinPending[name] = { step = 1 }
-                                        PBM.SendToBot("co ?", name)
-                                        strCount = strCount + 1
-                                    end
-                                end
-                            end
-                            if strCount > 0 then
-                                LichborneAddStatus:SetText("|cff44ff44Full Group Scan complete!|r |cffd4af37Fetching strategies: "..strCount.." members...|r")
-                            end
-                            return
-                        end
-                        local unit = units[sIdx]; if not UnitExists(unit) then sIdx = sIdx + 1; return end
-                        local targetName = UnitName(unit)
-                        if not targetName then PBM.DBG("|cffff4444[NIL]|r UnitName("..unit..") nil - skipping"); sIdx = sIdx + 1; return end
-                        local foundDi = nil
-                        for i, row in ipairs(LichborneTrackerDB.rows) do
-                            if row.name and row.name:lower() == targetName:lower() then foundDi = i; break end
-                        end
-                        if not foundDi then
-                            LichborneOutput("|cffC69B3APBM:|r Skipping "..tostring(targetName).." (not tracked)", 1, 0.6, 0.3)
-                            sIdx = sIdx + 1; return
-                        end
-                        LichborneAddStatus:SetText("Specialization scan |cffffff88"..tostring(targetName).."|r... ("..sIdx.."/"..#units..")")
-                        PBM.State.LichborneSpecTarget = foundDi; PBM.State.LichborneInspectUnit = unit
-                        if LichborneTrackerDB.rows[foundDi] then LichborneTrackerDB.rows[foundDi].spec = "" end
-                        PBM.DBG("InspectUnit("..unit..") -> FullScan Spec for |cffffff88"..tostring(targetName).."|r ("..sIdx.."/"..#units..")")
-                        InspectUnit(unit); PBM.State.LichborneSpecGUID = UnitGUID(unit); if not PBM.State.LichborneSpecGUID then PBM.DBG("|cffff4444[NIL]|r UnitGUID("..unit..")=nil — GUID capture skipped") end; PBM.State.specWait = 0; sIdx = sIdx + 1; sInspecting = true; sElapsed = 0
-                    end)
+                    end
+                    if strCount > 0 then
+                        LichborneAddStatus:SetText("|cff44ff44Full Group Scan complete!|r |cffd4af37Fetching strategies: "..strCount.." members...|r")
+                    end
                     return
                 end
                 local unit = units[idx]; if not UnitExists(unit) then idx = idx + 1; return end
@@ -1112,10 +1088,18 @@ local function OnFirstShow()
                     LichborneOutput("|cffC69B3APBM:|r Skipping "..tostring(targetName).." (not tracked)", 1, 0.6, 0.3)
                     idx = idx + 1; return
                 end
-                LichborneAddStatus:SetText("Updating Gear for |cffffff88"..tostring(targetName).."|r... ("..idx.."/"..#units..")")
-                PBM.State.LichborneInspectTarget = foundDi; PBM.State.LichborneInspectUnit = unit
-                PBM.DBG("InspectUnit("..unit..") -> FullScan GS for |cffffff88"..tostring(targetName).."|r ("..idx.."/"..#units..")")
-                InspectUnit(unit); PBM.State.LichborneInspectGUID = UnitGUID(unit); if not PBM.State.LichborneInspectGUID then PBM.DBG("|cffff4444[NIL]|r UnitGUID("..unit..")=nil — GUID capture skipped") end; PBM.State.inspectWait = 0; idx = idx + 1; inspecting = true; elapsed = 0
+                LichborneAddStatus:SetText("Scanning gear+spec for |cffffff88"..tostring(targetName).."|r... ("..idx.."/"..#units..")")
+                PBM.State.LichborneInspectTarget = foundDi
+                PBM.State.LichborneSpecTarget    = foundDi
+                PBM.State.LichborneInspectUnit   = unit
+                if LichborneTrackerDB.rows[foundDi] then LichborneTrackerDB.rows[foundDi].spec = "" end
+                PBM.DBG("InspectUnit("..unit..") -> FullScan gear+spec for |cffffff88"..tostring(targetName).."|r ("..idx.."/"..#units..")")
+                InspectUnit(unit)
+                PBM.State.LichborneInspectGUID = UnitGUID(unit)
+                PBM.State.LichborneSpecGUID    = PBM.State.LichborneInspectGUID
+                if not PBM.State.LichborneInspectGUID then PBM.DBG("|cffff4444[NIL]|r UnitGUID("..unit..")=nil — GUID capture skipped") end
+                PBM.State.inspectWait = 0; PBM.State.specWait = 0
+                idx = idx + 1; inspecting = true; elapsed = 0
             end)
         end)
     end)

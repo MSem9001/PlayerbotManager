@@ -597,6 +597,20 @@ _specPickFrame:SetScript("OnEvent", function(_, _, msg, sender)
     if not msg:find("^Picking ") then return end
     local jobEntry = PBM.State.specSummonPicking[sender]
     if not jobEntry then return end
+    -- A freshly-addclass'd bot can roll and announce its own random
+    -- starting spec ("Picking <whatever>...") before our own
+    -- "talents spec <requested>" command has actually taken effect.
+    -- Only treat this as OUR confirmation if the reply actually names
+    -- the spec we asked for - otherwise ignore it and keep waiting
+    -- (the 15s fallback in ApplySpecToNewBot still catches a genuinely
+    -- missing/garbled reply). This is what was causing Assassination
+    -- Rogues/Balance Druids to end up auto-geared and strategized for
+    -- whatever spec the bot happened to roll first (Combat/Cat), since
+    -- that early unrelated "Picking " message was being accepted as
+    -- if it confirmed the requested spec.
+    if jobEntry.label and not msg:lower():find(jobEntry.label:lower(), 1, true) then
+        return
+    end
     PBM.State.specSummonPicking[sender] = nil
     SpecAfter(1, function()
         FinishBotSetup(sender, jobEntry)
